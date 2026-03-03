@@ -115,6 +115,29 @@ export const TimeTrackerProvider = ({ children }) => {
 
     const hideToast = () => setToastMessage(null);
 
+    // Live Focus State global
+    const [liveFocusState, setLiveFocusState] = useState({
+        isActive: false,
+        isMinimized: false,
+        activityId: null
+    });
+
+    const startLiveFocus = (activityId) => {
+        setLiveFocusState({ isActive: true, isMinimized: false, activityId });
+    };
+
+    const minimizeLiveFocus = () => {
+        setLiveFocusState(prev => ({ ...prev, isMinimized: true }));
+    };
+
+    const maximizeLiveFocus = () => {
+        setLiveFocusState(prev => ({ ...prev, isMinimized: false }));
+    };
+
+    const finishLiveFocus = () => {
+        setLiveFocusState({ isActive: false, isMinimized: false, activityId: null });
+    };
+
     return (
         <TimeTrackerContext.Provider value={{
             activities,
@@ -128,7 +151,12 @@ export const TimeTrackerProvider = ({ children }) => {
             removeSlotsWithUndo,
             undoDelete,
             hideToast,
-            toastMessage
+            toastMessage,
+            liveFocusState,
+            startLiveFocus,
+            minimizeLiveFocus,
+            maximizeLiveFocus,
+            finishLiveFocus
         }}>
             {children}
         </TimeTrackerContext.Provider>

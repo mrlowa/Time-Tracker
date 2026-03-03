@@ -89,11 +89,21 @@ const Dashboard = () => {
     );
 };
 
+import { useCatchUpNotification } from '../hooks/useCatchUpNotification';
+import NotificationModal from './NotificationModal';
+
 const Layout = () => {
+    const { logs } = useTimeTracker();
+    const { permission, requestPermission } = useCatchUpNotification(logs);
+
     return (
-        <TimeTrackerProvider>
+        <>
             <Dashboard />
-        </TimeTrackerProvider>
+            <NotificationModal
+                permission={permission}
+                onRequestPermission={requestPermission}
+            />
+        </>
     );
 };
 

@@ -98,3 +98,32 @@ export const getLogicalDate = (slotTime, activityName = '') => {
 export const calculateStatsWithLogicalDays = (_logs, _activities, _range, _now) => {
     return {};
 };
+
+/**
+ * Generates an array of 5-minute slot ISO strings from elapsed seconds
+ */
+export const generateSlotsFromElapsed = (elapsedSeconds) => {
+    // Round elapsed seconds to nearest 5 minutes (300 seconds)
+    // Actually, maybe we just round up so they get credit for partial work if > 2.5 mins
+    const minutes = Math.round(elapsedSeconds / 60);
+    const slotsCount = Math.max(1, Math.round(minutes / 5)); // Give at least 1 slot if they finished it
+
+    const slots = [];
+    const now = new Date();
+    // We want to work backwards from "now"
+
+    // First, align "now" to the nearest 5-minute grid slot (floor it)
+    const currentMin = now.getHours() * 60 + now.getMinutes();
+    const currentGridMin = Math.floor(currentMin / 5) * 5;
+
+    let cursor = new Date(now);
+    cursor.setHours(Math.floor(currentGridMin / 60), currentGridMin % 60, 0, 0);
+
+    // We generate 'slotsCount' number of slots working backwards
+    for (let i = 0; i < slotsCount; i++) {
+        slots.push(cursor.toISOString());
+        cursor = addMinutes(cursor, -5);
+    }
+
+    return slots;
+};
