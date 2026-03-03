@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+// removed createPortal
 import { format, addDays, subDays, startOfDay, addMinutes, isSameDay, parse, isValid } from 'date-fns';
 import { useTimeTracker } from '../context/TimeTrackerContext';
+import { useGesture } from '@use-gesture/react';
+import { Drawer } from 'vaul';
 import Icon from './Icon';
 import { deriveEventsFromLogs } from '../utils/timeUtils';
 
@@ -17,7 +19,17 @@ const DayView = ({ activeActivityId }) => {
     const [isDragging, setIsDragging] = useState(false);
     const [dragMode, setDragMode] = useState(null);
     const [editingEventId, setEditingEventId] = useState(null);
+    const [selectedEventId, setSelectedEventId] = useState(null); // Tap to reveal handles
     const [dragPreview, setDragPreview] = useState(null);
+
+    // Haptics ref to track last snapped min to prevent over-vibration
+    const lastSnappedMinRef = useRef(-1);
+
+    const triggerHaptic = () => {
+        if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+            window.navigator.vibrate(10);
+        }
+    };
 
     // Context Menu State
     const [contextMenu, setContextMenu] = useState(null);
@@ -88,10 +100,26 @@ const DayView = ({ activeActivityId }) => {
 
     // ... Event Handlers ...
 
-    const handlePrevDay = () => setCurrentDate(subDays(currentDate, 1));
-    const handleNextDay = () => setCurrentDate(addDays(currentDate, 1));
+    const handlePrevDay = () => setCurrentDate(prev => subDays(prev, 1));
+    const handleNextDay = () => setCurrentDate(prev => addDays(prev, 1));
 
-    const handleZoomChange = (e) => setZoomLevel(parseFloat(e.target.value));
+    // Gesture binds for Swipe & Pinch
+    const bindGestures = useGesture({
+        onPinch: ({ offset: [d], event }) => {
+            // Map offset to a reasonable zoom between 0.5 and 3
+            if (event) event.preventDefault();
+            const newZoom = Math.max(0.5, Math.min(3, 1 + (d / 200)));
+            setZoomLevel(newZoom);
+        },
+        onDrag: ({ swipe: [sx] }) => {
+            // If it's a pronounced horizontal swipe
+            if (sx === -1) handleNextDay();
+            if (sx === 1) handlePrevDay();
+        }
+    }, {
+        drag: { axis: 'x', swipe: { velocity: 0.5, distance: 40 } },
+        pinch: { scaleBounds: { min: 0.5, max: 3 }, modifierKey: null }
+    });
 
     const handleScroll = () => {
         // Only relevant if we wanted to sync scrolls or something, 
@@ -156,20 +184,9 @@ const DayView = ({ activeActivityId }) => {
     const handleContextMenu = (e, event) => {
         e.preventDefault();
         e.stopPropagation();
-        // Calculate position - keep away from edges if possible
-        let x = e.clientX;
-        let y = e.clientY;
-
-        // Basic bounds check (simplified)
-        if (window.innerWidth - x < 250) x -= 220;
-        if (window.innerHeight - y < 200) y -= 160;
-
-        setContextMenu({
-            x,
-            y,
-            event
-        });
-        setChangeActivityMenu(false); // reset submenu
+        triggerHaptic();
+        setContextMenu({ event });
+        setChangeActivityMenu(false);
     };
 
     const handleMenuAction = (action, payload) => {
@@ -187,13 +204,33 @@ const DayView = ({ activeActivityId }) => {
         };
 
         if (action === 'delete') {
-            // Delete slots (pass null as activityId)
             logSlots(getEventSlotIds(), null);
         } else if (action === 'change') {
             const newActivityId = payload;
             logSlots(getEventSlotIds(), newActivityId);
         } else if (action === 'duration') {
             setEditingEventId(event.id);
+        } else if (action === 'duplicate') {
+            const durationMins = event.endMin - event.startMin;
+            const newStartMin = event.endMin; // Paste directly after
+            const newEndMin = Math.min(1440, newStartMin + durationMins);
+            const ids = [];
+            const dayStart = startOfDay(currentDate);
+            for (let m = newStartMin; m < newEndMin; m += 5) {
+                ids.push(addMinutes(dayStart, m).toISOString());
+            }
+            logSlots(ids, event.activity.id);
+        } else if (action === 'split') {
+            const durationMins = event.endMin - event.startMin;
+            const halfDuration = Math.max(5, Math.floor((durationMins / 2) / 5) * 5);
+            // Delete the second half to visually split it
+            const secondHalfStart = event.startMin + halfDuration;
+            const ids = [];
+            const dayStart = startOfDay(currentDate);
+            for (let m = secondHalfStart; m < event.endMin; m += 5) {
+                ids.push(addMinutes(dayStart, m).toISOString());
+            }
+            logSlots(ids, null);
         }
 
         setContextMenu(null);
@@ -253,7 +290,11 @@ const DayView = ({ activeActivityId }) => {
                     return (
                         <div
                             key={`${event.id}-${colIndex}`}
-                            onMouseDown={(e) => e.stopPropagation()}
+                            className="event-block"
+                            onPointerDown={e => {
+                                e.stopPropagation();
+                                setSelectedEventId(event.id);
+                            }}
                             onContextMenu={(e) => handleContextMenu(e, event)}
                             style={{
                                 position: 'absolute',
@@ -351,15 +392,13 @@ const DayView = ({ activeActivityId }) => {
                                 </div>
                             </div>
 
-                            {/* Resize Handle (Only if not split or at actual end) */}
-                            {/* Simplified: Always show handle, might be confusing at split boundary but valid for now */}
-                            <div
-                                onMouseDown={(e) => handleResizeStart(e, event)}
-                                style={{
-                                    position: 'absolute', bottom: 0, left: 0, right: 0, height: '10px',
-                                    cursor: 'ns-resize', zIndex: 20
-                                }}
-                            />
+                            {/* Tap-to-Reveal Mobile Resize Handle */}
+                            {selectedEventId === event.id && (
+                                <div
+                                    className="resize-handle-mobile"
+                                    onPointerDown={(e) => handleResizeStart(e, event)}
+                                />
+                            )}
                         </div>
                     );
                 })}
@@ -372,56 +411,52 @@ const DayView = ({ activeActivityId }) => {
     // Implementation: For now, drag only works within relative coordinate of the target column.
     // To support drag across columns, we need to map mouse X/Y to global minute 0-1440.
 
-    const handleGlobalMouseMove = (e) => {
-        if (!isDragging || !dragPreview || !scrollRef.current) return;
+    // Abstract coordinate mapping
+    const getMinFromPointer = (clientX, clientY) => {
+        if (!scrollRef.current) return 0;
         const rect = scrollRef.current.getBoundingClientRect();
-
-        let currentMin = 0;
-
         if (viewMode === 'standard') {
-            const relativeY = e.clientY - rect.top + scrollRef.current.scrollTop;
-            currentMin = relativeY / activePxPerMin;
+            const relativeY = clientY - rect.top + scrollRef.current.scrollTop;
+            return Math.max(0, Math.min(1440, relativeY / activePxPerMin));
         } else {
-            // Overview Mode
-            const relativeX = e.clientX - rect.left;
-            const relativeY = e.clientY - rect.top;
+            const relativeX = clientX - rect.left;
+            const relativeY = clientY - rect.top;
             const colWidth = rect.width / 2;
+            let currentMin = relativeX < colWidth ? relativeY / activePxPerMin : 720 + (relativeY / activePxPerMin);
+            return Math.max(0, Math.min(1440, currentMin));
+        }
+    };
 
-            if (relativeX < colWidth) {
-                // AM Column
-                currentMin = relativeY / activePxPerMin;
-            } else {
-                // PM Column
-                currentMin = 720 + (relativeY / activePxPerMin);
-            }
+    const handleGlobalPointerMove = (e) => {
+        if (!isDragging || !dragPreview || !scrollRef.current) return;
+        const currentMin = getMinFromPointer(e.clientX, e.clientY);
+
+        // Haptic feedback snap logic
+        const snappedCurrent = Math.floor(currentMin / 5) * 5;
+        if (snappedCurrent !== lastSnappedMinRef.current) {
+            triggerHaptic();
+            lastSnappedMinRef.current = snappedCurrent;
         }
 
-        if (currentMin < 0) currentMin = 0;
-        if (currentMin > 1440) currentMin = 1440;
         setDragPreview(prev => ({ ...prev, currentEndMin: currentMin }));
     };
 
-    const handleGlobalMouseDown = (e) => {
+    const handleGlobalPointerDown = (e) => {
         if (!scrollRef.current || !activeActivityId) return;
-        const rect = scrollRef.current.getBoundingClientRect();
 
-        let clickedMin = 0;
-        if (viewMode === 'standard') {
-            const relativeY = e.clientY - rect.top + scrollRef.current.scrollTop;
-            clickedMin = relativeY / activePxPerMin;
-        } else {
-            const relativeX = e.clientX - rect.left;
-            const relativeY = e.clientY - rect.top;
-            const colWidth = rect.width / 2;
-            if (relativeX < colWidth) {
-                clickedMin = relativeY / activePxPerMin;
-            } else {
-                clickedMin = 720 + (relativeY / activePxPerMin);
-            }
-        }
+        // Ignore if clicking on existing events, buttons, or scrollbar (approx)
+        if (e.target.closest('.event-block') || e.target.closest('button') || e.clientX > scrollRef.current.getBoundingClientRect().right - 15) return;
 
+        // Capture pointer is important for mobile touch-drag so it doesn't get lost
+        e.target.setPointerCapture(e.pointerId);
+
+        const clickedMin = getMinFromPointer(e.clientX, e.clientY);
         const snappedStart = Math.floor(clickedMin / 5) * 5;
         const activity = getActivity(activeActivityId);
+
+        // Reset haptic ref
+        lastSnappedMinRef.current = snappedStart;
+        triggerHaptic();
 
         setIsDragging(true);
         setDragMode('create');
@@ -429,7 +464,7 @@ const DayView = ({ activeActivityId }) => {
             mode: 'create',
             activityId: activeActivityId,
             startMin: snappedStart,
-            currentEndMin: snappedStart + 5,
+            currentEndMin: snappedStart + 5, // minimum 5 mins
             color: activity.color,
             name: activity.name,
             icon: activity.icon
@@ -478,26 +513,19 @@ const DayView = ({ activeActivityId }) => {
                     {viewMode === 'standard' && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>Zoom</span>
-                            <input
-                                type="range"
-                                min="0.5"
-                                max="3"
-                                step="0.1"
-                                value={zoomLevel}
-                                onChange={handleZoomChange}
-                                style={{ width: '80px' }}
-                            />
+                            {/* Replaced with pinch-to-zoom gestures */}
                         </div>
                     )}
                 </div>
             </div>
 
             <div
+                {...bindGestures()}
                 ref={scrollRef}
-                onMouseDown={handleGlobalMouseDown}
-                onMouseMove={handleGlobalMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
+                onPointerDown={handleGlobalPointerDown}
+                onPointerMove={handleGlobalPointerMove}
+                onPointerUp={handleMouseUp}
+                onPointerLeave={handleMouseUp}
                 onScroll={handleScroll}
                 style={{
                     flex: 1,
@@ -506,24 +534,18 @@ const DayView = ({ activeActivityId }) => {
                     borderRadius: '12px',
                     background: 'rgba(0,0,0,0.2)',
                     position: 'relative',
+                    touchAction: isDragging ? 'none' : 'pan-y' // Prevent vertical scroll while drawing
                 }}
             >
                 {viewMode === 'standard' ? (
                     <div style={{ height: `${totalHeight}px`, position: 'relative' }}>
                         {renderColumn(0, 1440, 0)}
-                        {/* Drag Preview (Standard) */}
+                        {/* Tactile Ghost Dialog Preview (Standard) */}
                         {dragPreview && (
-                            <div style={{
-                                position: 'absolute',
-                                top: `${Math.min(dragPreview.startMin, dragPreview.currentEndMin) * activePxPerMin}px`,
-                                height: `${Math.abs(dragPreview.currentEndMin - dragPreview.startMin) * activePxPerMin}px`,
+                            <div className="ghost-preview" style={{
+                                top: `${Math.floor(Math.min(dragPreview.startMin, dragPreview.currentEndMin) / 5) * 5 * activePxPerMin}px`,
+                                height: `${Math.max(5, Math.floor(Math.abs(dragPreview.currentEndMin - dragPreview.startMin) / 5) * 5) * activePxPerMin}px`,
                                 left: '60px', right: '10px',
-                                background: dragPreview.color,
-                                borderRadius: '6px',
-                                boxShadow: `0 5px 20px ${dragPreview.color}66`,
-                                border: '1px solid rgba(255,255,255,0.3)',
-                                zIndex: 20,
-                                opacity: 0.9, pointerEvents: 'none'
                             }} />
                         )}
                     </div>
@@ -539,35 +561,29 @@ const DayView = ({ activeActivityId }) => {
                             {renderColumn(720, 1440, 1)}
                         </div>
 
-                        {/* Drag Preview (Overview) */}
+                        {/* Tactile Ghost Preview (Overview) */}
                         {dragPreview && (
-                            // Logic to render preview across columns?
-                            // Simplification: Render absolute on top of everything? 
-                            // No, easier to render logic similar to events: Split if needed
                             (() => {
-                                const start = Math.min(dragPreview.startMin, dragPreview.currentEndMin);
-                                const end = Math.max(dragPreview.startMin, dragPreview.currentEndMin);
+                                const start = Math.floor(Math.min(dragPreview.startMin, dragPreview.currentEndMin) / 5) * 5;
+                                const end = Math.floor(Math.max(dragPreview.startMin, dragPreview.currentEndMin) / 5) * 5;
+                                const hDuration = Math.max(5, end - start);
 
                                 const renderPreviewPart = (s, e, offset, leftPos) => (
-                                    <div style={{
-                                        position: 'absolute',
+                                    <div className="ghost-preview" style={{
                                         top: `${(s - offset) * activePxPerMin}px`,
                                         height: `${(e - s) * activePxPerMin}px`,
                                         left: typeof leftPos === 'string' ? leftPos : `${leftPos}%`,
-                                        width: 'calc(50% - 35px)', // Rough calc
-                                        marginLeft: leftPos > 0 ? '30px' : '60px', // adjust for grid
-                                        background: dragPreview.color,
-                                        borderRadius: '6px',
-                                        zIndex: 20, opacity: 0.9, pointerEvents: 'none'
+                                        width: 'calc(50% - 35px)',
+                                        marginLeft: leftPos > 0 ? '30px' : '60px',
                                     }} />
                                 );
 
                                 return (
                                     <>
                                         {/* AM Part */}
-                                        {start < 720 && renderPreviewPart(Math.max(start, 0), Math.min(end, 720), 0, 0)}
+                                        {start < 720 && renderPreviewPart(Math.max(start, 0), Math.min(start + hDuration, 720), 0, 0)}
                                         {/* PM Part */}
-                                        {end > 720 && renderPreviewPart(Math.max(start, 720), Math.min(end, 1440), 720, 50)}
+                                        {start + hDuration > 720 && renderPreviewPart(Math.max(start, 720), Math.min(start + hDuration, 1440), 720, 50)}
                                     </>
                                 );
                             })()
@@ -577,91 +593,70 @@ const DayView = ({ activeActivityId }) => {
             </div>
 
 
-            {/* Context Menu Overlay - PORTAL TO BODY */}
-            {contextMenu && createPortal(
-                <div
-                    style={{
-                        position: 'fixed',
-                        top: contextMenu.y,
-                        left: contextMenu.x,
-                        zIndex: 9999,
-                        background: 'rgba(30, 30, 30, 0.6)',
-                        backdropFilter: 'blur(12px)',
-                        WebkitBackdropFilter: 'blur(12px)',
-                        border: '1px solid rgba(255,255,255,0.1)',
-                        borderRadius: '12px',
-                        boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                        padding: '0.6rem',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        minWidth: '220px',
-                        color: '#FFF',
-                        fontSize: '0.9rem'
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <div style={{ padding: '0.5rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '0.5rem', fontWeight: 'bold', color: contextMenu.event.activity.color, fontSize: '0.95rem' }}>
-                        {contextMenu.event.activity.name}
-                    </div>
+            {/* Vaul Native Bottom Sheet for Context Menu */}
+            <Drawer.Root open={!!contextMenu} onOpenChange={(open) => !open && setContextMenu(null)}>
+                <Drawer.Portal>
+                    <Drawer.Overlay style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 999 }} />
+                    <Drawer.Content style={{
+                        background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+                        borderRadius: '24px 24px 0 0', height: 'auto', bottom: 0, left: 0, right: 0,
+                        position: 'fixed', padding: '1.5rem', zIndex: 1000,
+                        boxShadow: '0 -10px 40px rgba(0,0,0,0.5)'
+                    }}>
+                        <div style={{ alignSelf: 'center', width: '40px', height: '5px', background: 'rgba(255,255,255,0.2)', borderRadius: '3px', marginBottom: '1.5rem' }} />
 
-                    <div
-                        className="menu-item"
-                        onClick={() => handleMenuAction('duration')}
-                        style={{ padding: '0.6rem 0.5rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', transition: 'background 0.2s' }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    >
-                        <Icon name="Clock" size={16} color="#DDD" /> <span style={{ color: '#EEE' }}>Duration (Edit)</span>
-                    </div>
-
-                    <div
-                        className="menu-item"
-                        onClick={() => setChangeActivityMenu(!changeActivityMenu)}
-                        style={{ padding: '0.6rem 0.5rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between', transition: 'background 0.2s' }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <Icon name="RefreshCw" size={16} color="#DDD" /> <span style={{ color: '#EEE' }}>Change Activity</span>
-                        </div>
-                        <Icon name="ChevronRight" size={14} color="#AAA" />
-                    </div>
-
-                    {changeActivityMenu && (
-                        <div style={{
-                            maxHeight: '200px', overflowY: 'auto',
-                            background: 'rgba(0,0,0,0.3)',
-                            borderRadius: '8px',
-                            margin: '0.5rem 0',
-                            border: '1px solid rgba(255,255,255,0.05)'
-                        }}>
-                            {activities.map(act => (
-                                <div
-                                    key={act.id}
-                                    onClick={() => handleMenuAction('change', act.id)}
-                                    style={{ padding: '0.6rem 0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', borderBottom: '1px solid rgba(255,255,255,0.02)' }}
-                                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                                >
-                                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: act.color, flexShrink: 0 }} />
-                                    <span style={{ color: '#EEE' }}>{act.name}</span>
+                        {contextMenu && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '0.5rem', padding: '0 0.5rem' }}>
+                                    <div style={{ background: contextMenu.event.activity.color, width: '32px', height: '32px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Icon name={contextMenu.event.activity.icon} size={18} color="#FFF" />
+                                    </div>
+                                    <div>
+                                        <h3 style={{ margin: 0, color: '#FFF', fontSize: '1.1rem' }}>{contextMenu.event.activity.name}</h3>
+                                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                            {format(contextMenu.event.startTime, 'HH:mm')} - {format(contextMenu.event.endTime, 'HH:mm')}
+                                        </span>
+                                    </div>
                                 </div>
-                            ))}
-                        </div>
-                    )}
 
-                    <div
-                        className="menu-item"
-                        onClick={() => handleMenuAction('delete')}
-                        style={{ padding: '0.6rem 0.5rem', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', color: '#EF4444', marginTop: '0.5rem', transition: 'background 0.2s' }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    >
-                        <Icon name="Trash2" size={16} /> Delete
-                    </div>
-                </div>,
-                document.body
-            )}
+                                <button onClick={() => handleMenuAction('duration')} className="glass-panel" style={{ padding: '1rem', border: 'none', display: 'flex', alignItems: 'center', gap: '12px', color: '#FFF', fontSize: '1rem', cursor: 'pointer', textAlign: 'left' }}>
+                                    <Icon name="Clock" size={20} color="var(--text-secondary)" /> Edit Duration manually
+                                </button>
+
+                                <button onClick={() => handleMenuAction('split')} className="glass-panel" style={{ padding: '1rem', border: 'none', display: 'flex', alignItems: 'center', gap: '12px', color: '#FFF', fontSize: '1rem', cursor: 'pointer', textAlign: 'left' }}>
+                                    <Icon name="Scissors" size={20} color="var(--text-secondary)" /> Split Segment in half
+                                </button>
+
+                                <button onClick={() => handleMenuAction('duplicate')} className="glass-panel" style={{ padding: '1rem', border: 'none', display: 'flex', alignItems: 'center', gap: '12px', color: '#FFF', fontSize: '1rem', cursor: 'pointer', textAlign: 'left' }}>
+                                    <Icon name="Copy" size={20} color="var(--text-secondary)" /> Duplicate immediately after
+                                </button>
+
+                                <button onClick={() => setChangeActivityMenu(!changeActivityMenu)} className="glass-panel" style={{ padding: '1rem', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#FFF', fontSize: '1rem', cursor: 'pointer', textAlign: 'left' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                        <Icon name="RefreshCw" size={20} color="var(--text-secondary)" /> Change Activity
+                                    </div>
+                                    <Icon name={changeActivityMenu ? "ChevronUp" : "ChevronDown"} size={16} color="var(--text-secondary)" />
+                                </button>
+
+                                {changeActivityMenu && (
+                                    <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '12px', padding: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                        {activities.map(act => (
+                                            <div key={act.id} onClick={() => handleMenuAction('change', act.id)} style={{ padding: '0.8rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.02)' }}>
+                                                <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: act.color }} />
+                                                <span style={{ color: '#FFF' }}>{act.name}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                <button onClick={() => handleMenuAction('delete')} className="glass-panel" style={{ padding: '1rem', border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.1)', display: 'flex', alignItems: 'center', gap: '12px', color: '#EF4444', fontSize: '1rem', cursor: 'pointer', textAlign: 'left', marginTop: '0.5rem' }}>
+                                    <Icon name="Trash2" size={20} /> Delete Event Block
+                                </button>
+                            </div>
+                        )}
+                    </Drawer.Content>
+                </Drawer.Portal>
+            </Drawer.Root>
         </div>
     );
 };

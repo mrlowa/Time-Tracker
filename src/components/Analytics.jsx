@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie
 } from 'recharts';
+import { useDrag } from '@use-gesture/react';
+import { Drawer } from 'vaul';
 import {
     format, startOfDay, startOfWeek, startOfMonth, startOfYear,
     endOfDay, endOfWeek, endOfMonth, endOfYear,
@@ -20,12 +22,53 @@ const formatDuration = (minutes) => {
     return `${h}h ${m}min`;
 };
 
+const CustomTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+        const data = payload[0].payload;
+        return (
+            <div className="glass-panel" style={{
+                padding: '0.6rem 1rem',
+                border: `1px solid ${data.color}`,
+                background: 'rgba(26,26,26,0.85)',
+                display: 'flex', flexDirection: 'column', gap: '4px',
+            }}>
+                <span style={{ fontWeight: 600, color: '#FFF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: data.color }} />
+                    {data.name}
+                </span>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{formatDuration(data.minutes)}</span>
+            </div>
+        );
+    }
+    return null;
+};
+
 const Analytics = () => {
     const [range, setRange] = useState('Week');
     const { logs, activities, getActivity } = useTimeTracker();
     const [referenceDate, setReferenceDate] = useState(new Date());
     const [filterOpen, setFilterOpen] = useState(false);
     const [hiddenActivityIds, setHiddenActivityIds] = useState(new Set());
+    const [refreshing, setRefreshing] = useState(false);
+    const [pullY, setPullY] = useState(0);
+
+    const bindPullToRefresh = useDrag(({ movement: [, my], last, cancel, active }) => {
+        if (window.scrollY > 0) return cancel();
+
+        if (my > 0 && my < 200) {
+            setPullY(active ? my : 0);
+            if (my > 100 && last && !refreshing) {
+                setRefreshing(true);
+                if (window.navigator && window.navigator.vibrate) window.navigator.vibrate([10, 30, 10]);
+                setTimeout(() => {
+                    setRefreshing(false);
+                    setPullY(0);
+                }, 1000);
+            }
+        } else if (!active && !refreshing) {
+            setPullY(0);
+        }
+    }, { filterTaps: true, axis: 'y' });
 
     // Reset reference date when switching ranges to avoid confusion
     // e.g. switching from specific day in 2023 to "Week" might be confusing if it stays in 2023 without context
@@ -165,7 +208,19 @@ const Analytics = () => {
     }, [logs, range, referenceDate, getActivity, hiddenActivityIds]);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <div {...bindPullToRefresh()} style={{
+            display: 'flex', flexDirection: 'column', gap: '2rem', minHeight: '100%',
+            transform: `translateY(${refreshing ? 60 : pullY * 0.4}px)`,
+            transition: pullY === 0 || refreshing ? 'transform 0.3s cubic-bezier(0.1, 0.9, 0.2, 1)' : 'none',
+            touchAction: 'pan-y'
+        }}>
+
+            {/* Pull-to-refresh Visual Indicator */}
+            {(pullY > 0 || refreshing) && (
+                <div style={{ position: 'absolute', top: -50, left: 0, right: 0, display: 'flex', justifyContent: 'center', color: 'var(--accent-primary)', opacity: Math.min(1, pullY / 100) }}>
+                    <Icon name="RefreshCw" size={24} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none', transform: `rotate(${Math.min(180, pullY * 2)}deg)` }} />
+                </div>
+            )}
 
             {/* Header and Controls */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -295,11 +350,11 @@ const Analytics = () => {
                 </div>
             </div>
 
-            {/* Charts */}
+            {/* Charts - Progressive Disclosure Layout */}
             {stats.data.length > 0 ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem', height: '300px' }}>
-                    <div className="glass-panel" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
-                        <h3 style={{ marginTop: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>Distribution</h3>
+                <>
+                    <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', height: '300px' }}>
+                        <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', color: 'var(--text-secondary)', textAlign: 'center' }}>Distribution</h3>
                         <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
                                 <Pie
@@ -315,36 +370,54 @@ const Analytics = () => {
                                         <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
                                     ))}
                                 </Pie>
-                                <Tooltip
-                                    contentStyle={{ background: '#1A1A1A', border: '1px solid #333', borderRadius: '8px' }}
-                                    itemStyle={{ color: '#E0E0E0' }}
-                                    formatter={(value) => formatDuration(value)}
-                                />
+                                <Tooltip content={<CustomTooltip />} />
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
 
-                    <div className="glass-panel" style={{ padding: '1rem', display: 'flex', flexDirection: 'column' }}>
-                        <h3 style={{ marginTop: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>Breakdown (Hours)</h3>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={stats.data} layout="vertical" margin={{ left: 20 }}>
-                                <XAxis type="number" hide />
-                                <YAxis dataKey="name" type="category" width={80} tick={{ fontSize: 12, fill: '#A0A0A0' }} />
-                                <Tooltip
-                                    cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                                    contentStyle={{ background: '#1A1A1A', border: '1px solid #333', borderRadius: '8px' }}
-                                    itemStyle={{ color: '#E0E0E0' }}
-                                    formatter={(value) => formatDuration(value)}
-                                />
-                                <Bar dataKey="minutes" radius={[0, 4, 4, 0]}>
-                                    {stats.data.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.color} />
-                                    ))}
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
+                    {/* Scrubbing Drawer Handle for Bar Chart */}
+                    <Drawer.Root>
+                        <Drawer.Trigger asChild>
+                            <button className="glass-panel" style={{
+                                margin: '2rem auto', padding: '1rem 2.5rem', border: 'none', borderRadius: '24px',
+                                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)',
+                                background: 'var(--glass-bg)', cursor: 'pointer', boxShadow: 'var(--shadow-md)'
+                            }}>
+                                <div style={{ width: '40px', height: '4px', background: 'var(--border-color)', borderRadius: '2px' }} />
+                                <span style={{ fontWeight: 500 }}>Swipe up for details</span>
+                            </button>
+                        </Drawer.Trigger>
+                        <Drawer.Portal>
+                            <Drawer.Overlay style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 999 }} />
+                            <Drawer.Content style={{
+                                background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
+                                borderRadius: '24px 24px 0 0', height: '75vh', bottom: 0, left: 0, right: 0,
+                                position: 'fixed', padding: '1.5rem', zIndex: 1000
+                            }}>
+                                <div style={{ alignSelf: 'center', width: '40px', height: '5px', background: 'rgba(255,255,255,0.2)', borderRadius: '3px', marginBottom: '1.5rem' }} />
+                                <h3 style={{ marginTop: 0, marginBottom: '2rem', fontSize: '1.2rem', color: '#FFF' }}>Activity Breakdown (Hours)</h3>
+
+                                <div style={{ flex: 1, minHeight: 0 }}>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={stats.data} layout="vertical" margin={{ left: 20, right: 20 }}>
+                                            <XAxis type="number" hide />
+                                            <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 13, fill: '#E0E0E0' }} axisLine={false} tickLine={false} />
+                                            <Tooltip
+                                                cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                                                content={<CustomTooltip />}
+                                            />
+                                            <Bar dataKey="minutes" radius={[0, 6, 6, 0]}>
+                                                {stats.data.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                                ))}
+                                            </Bar>
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </Drawer.Content>
+                        </Drawer.Portal>
+                    </Drawer.Root>
+                </>
             ) : (
                 <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                     No data for this period

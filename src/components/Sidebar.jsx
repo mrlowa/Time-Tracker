@@ -1,9 +1,28 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { useTimeTracker } from '../context/TimeTrackerContext';
 import Icon from './Icon';
+import { startOfDay, addMinutes } from 'date-fns';
 
 const Sidebar = ({ currentView, onViewChange, activeActivityId, onActivitySelect, onOpenCreator, onEditActivity }) => {
-    const { activities } = useTimeTracker();
+    const { activities, logSlots } = useTimeTracker();
+
+    const longPressTimerRef = useRef(null);
+    const hasLongPressedRef = useRef(false);
+    const [quickLogFlashId, setQuickLogFlashId] = useState(null);
+
+    const handleLongPress = (activityId) => {
+        const now = new Date();
+        const currentMin = now.getHours() * 60 + now.getMinutes();
+        const startMin = Math.floor(currentMin / 5) * 5;
+        const ids = [addMinutes(startOfDay(now), startMin).toISOString()];
+
+        logSlots(ids, activityId);
+        onActivitySelect(activityId);
+
+        if (window.navigator && window.navigator.vibrate) {
+            window.navigator.vibrate([20, 50, 20]); // Distinct double buzz
+        }
+    };
 
     return (
         <aside className="glass-panel sidebar-container" style={{
@@ -75,7 +94,7 @@ const Sidebar = ({ currentView, onViewChange, activeActivityId, onActivitySelect
 
                 {activities.map(activity => (
                     <div
-                        className="activity-item"
+                        className={`activity-item ${activeActivityId === activity.id ? 'active-pill' : ''} ${quickLogFlashId === activity.id ? 'flash-success' : ''}`}
                         key={activity.id}
                         style={{
                             display: 'flex',
@@ -83,16 +102,32 @@ const Sidebar = ({ currentView, onViewChange, activeActivityId, onActivitySelect
                             gap: '0.5rem',
                             padding: '0.5rem',
                             borderRadius: '12px',
-                            background: activeActivityId === activity.id
-                                ? `linear-gradient(90deg, ${activity.color}22, transparent)`
+                            background: activeActivityId === activity.id || quickLogFlashId === activity.id
+                                ? `linear-gradient(90deg, ${activity.color}33, transparent)`
                                 : 'transparent',
                             border: '1px solid',
-                            borderColor: activeActivityId === activity.id ? activity.color : 'transparent',
+                            borderColor: activeActivityId === activity.id || quickLogFlashId === activity.id ? activity.color : 'transparent',
                             transition: 'all 0.2s',
                         }}
                     >
                         <button
-                            onClick={() => onActivitySelect(activity.id)}
+                            onPointerDown={() => {
+                                hasLongPressedRef.current = false;
+                                longPressTimerRef.current = setTimeout(() => {
+                                    hasLongPressedRef.current = true;
+                                    handleLongPress(activity.id);
+                                    setQuickLogFlashId(activity.id);
+                                    setTimeout(() => setQuickLogFlashId(null), 500);
+                                }, 500);
+                            }}
+                            onPointerUp={() => clearTimeout(longPressTimerRef.current)}
+                            onPointerLeave={() => clearTimeout(longPressTimerRef.current)}
+                            onPointerCancel={() => clearTimeout(longPressTimerRef.current)}
+                            onClick={() => {
+                                if (!hasLongPressedRef.current) {
+                                    onActivitySelect(activity.id);
+                                }
+                            }}
                             style={{
                                 flex: 1,
                                 display: 'flex',
@@ -103,7 +138,9 @@ const Sidebar = ({ currentView, onViewChange, activeActivityId, onActivitySelect
                                 color: 'var(--text-primary)',
                                 cursor: 'pointer',
                                 padding: '0.5rem',
-                                textAlign: 'left'
+                                textAlign: 'left',
+                                userSelect: 'none',
+                                touchAction: 'pan-x' // permit horizontal scroll but handle press
                             }}
                         >
                             <div style={{
