@@ -4,6 +4,7 @@ import DayView from './DayView';
 import ActivityCreator from './ActivityCreator';
 import Analytics from './Analytics';
 import { TimeTrackerProvider } from '../context/TimeTrackerContext';
+import Toast from './Toast';
 
 const Dashboard = () => {
     const [currentView, setCurrentView] = useState('day');
@@ -82,6 +83,8 @@ const Dashboard = () => {
                     </div>
                 </div>
             )}
+
+            <Toast />
         </div>
     );
 };

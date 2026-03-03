@@ -6,11 +6,46 @@ import { useGesture } from '@use-gesture/react';
 import { Drawer } from 'vaul';
 import Icon from './Icon';
 import { deriveEventsFromLogs } from '../utils/timeUtils';
+import useLongPress from '../hooks/useLongPress';
+
+const EventBlockWrapper = ({ event, scrollRef, viewMode, onLongPress, onClick, style, isMenuOpen, children }) => {
+    const handlers = useLongPress(
+        (e) => {
+            if (scrollRef.current && viewMode === 'standard') {
+                const rect = scrollRef.current.getBoundingClientRect();
+                if (e.clientX > rect.left + rect.width / 2) return;
+            }
+            onLongPress(e);
+        },
+        (e) => {
+            if (scrollRef.current && viewMode === 'standard') {
+                const rect = scrollRef.current.getBoundingClientRect();
+                if (e.clientX > rect.left + rect.width / 2) return;
+            }
+            onClick(e);
+        },
+        { delay: 400 }
+    );
+
+    const mergedStyle = {
+        ...style,
+        transform: isMenuOpen ? 'scale(1.02)' : 'scale(1)',
+        transition: 'transform 0.2s cubic-bezier(0.1, 0.9, 0.2, 1), box-shadow 0.2s',
+        zIndex: isMenuOpen ? 20 : style.zIndex,
+        boxShadow: isMenuOpen ? `0 10px 20px ${event.activity.color}66` : style.boxShadow,
+    };
+
+    return (
+        <div className="event-block" style={mergedStyle} {...handlers}>
+            {children}
+        </div>
+    );
+};
 
 const DayView = ({ activeActivityId }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [currentTime, setCurrentTime] = useState(new Date());
-    const { logs, logSlots, getActivity, activities } = useTimeTracker();
+    const { logs, logSlots, getActivity, activities, removeSlotsWithUndo } = useTimeTracker();
 
     const [zoomLevel, setZoomLevel] = useState(1);
     const scrollRef = useRef(null);
@@ -42,6 +77,9 @@ const DayView = ({ activeActivityId }) => {
     const [containerHeight, setContainerHeight] = useState(800);
 
     const pendingZoomCenterRef = useRef(null);
+    const autoScrollRef = useRef(null);
+    const lastPointerRef = useRef({ x: 0, y: 0 });
+    const lastTapRef = useRef({ time: 0, min: -1 });
 
     const events = useMemo(() => {
         return deriveEventsFromLogs(logs, currentDate, getActivity);
@@ -176,6 +214,8 @@ const DayView = ({ activeActivityId }) => {
             }
         }
 
+        if (autoScrollRef.current) cancelAnimationFrame(autoScrollRef.current);
+        autoScrollRef.current = null;
         setIsDragging(false);
         setDragMode(null);
         setDragPreview(null);
@@ -204,7 +244,7 @@ const DayView = ({ activeActivityId }) => {
         };
 
         if (action === 'delete') {
-            logSlots(getEventSlotIds(), null);
+            removeSlotsWithUndo(getEventSlotIds());
         } else if (action === 'change') {
             const newActivityId = payload;
             logSlots(getEventSlotIds(), newActivityId);
@@ -288,14 +328,17 @@ const DayView = ({ activeActivityId }) => {
                     const relativeEnd = Math.min(event.endMin, endOffsetMin) - startOffsetMin;
 
                     return (
-                        <div
+                        <EventBlockWrapper
                             key={`${event.id}-${colIndex}`}
-                            className="event-block"
-                            onPointerDown={e => {
+                            event={event}
+                            scrollRef={scrollRef}
+                            viewMode={viewMode}
+                            isMenuOpen={contextMenu && contextMenu.event.id === event.id}
+                            onLongPress={(e) => handleContextMenu(e, event)}
+                            onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedEventId(event.id);
                             }}
-                            onContextMenu={(e) => handleContextMenu(e, event)}
                             style={{
                                 position: 'absolute',
                                 top: `${relativeStart * activePxPerMin}px`,
@@ -399,7 +442,7 @@ const DayView = ({ activeActivityId }) => {
                                     onPointerDown={(e) => handleResizeStart(e, event)}
                                 />
                             )}
-                        </div>
+                        </EventBlockWrapper>
                     );
                 })}
             </div>
@@ -429,6 +472,10 @@ const DayView = ({ activeActivityId }) => {
 
     const handleGlobalPointerMove = (e) => {
         if (!isDragging || !dragPreview || !scrollRef.current) return;
+
+        // Save pointer for auto-scroll updates
+        lastPointerRef.current = { x: e.clientX, y: e.clientY };
+
         const currentMin = getMinFromPointer(e.clientX, e.clientY);
 
         // Haptic feedback snap logic
@@ -436,6 +483,36 @@ const DayView = ({ activeActivityId }) => {
         if (snappedCurrent !== lastSnappedMinRef.current) {
             triggerHaptic();
             lastSnappedMinRef.current = snappedCurrent;
+        }
+
+        // Edge Auto-scrolling Logic
+        const rect = scrollRef.current.getBoundingClientRect();
+        const relativeY = e.clientY - rect.top;
+        const scrollZone = Math.min(100, rect.height * 0.1);
+
+        let scrollDirection = 0;
+        if (relativeY < scrollZone) scrollDirection = -1;
+        else if (relativeY > rect.height - scrollZone) scrollDirection = 1;
+
+        if (scrollDirection !== 0 && viewMode === 'standard') {
+            if (!autoScrollRef.current) {
+                const scrollStep = () => {
+                    if (!scrollRef.current || !isDragging) return;
+                    scrollRef.current.scrollBy({ top: scrollDirection * 15, behavior: 'auto' });
+
+                    // Update drag preview to follow the scroll
+                    const newMin = getMinFromPointer(lastPointerRef.current.x, lastPointerRef.current.y);
+                    setDragPreview(prev => prev ? { ...prev, currentEndMin: newMin } : null);
+
+                    autoScrollRef.current = requestAnimationFrame(scrollStep);
+                };
+                autoScrollRef.current = requestAnimationFrame(scrollStep);
+            }
+        } else {
+            if (autoScrollRef.current) {
+                cancelAnimationFrame(autoScrollRef.current);
+                autoScrollRef.current = null;
+            }
         }
 
         setDragPreview(prev => ({ ...prev, currentEndMin: currentMin }));
@@ -447,12 +524,44 @@ const DayView = ({ activeActivityId }) => {
         // Ignore if clicking on existing events, buttons, or scrollbar (approx)
         if (e.target.closest('.event-block') || e.target.closest('button') || e.clientX > scrollRef.current.getBoundingClientRect().right - 15) return;
 
+        // Split-Screen Interaction: Ignore clicks in the right half (Scroll Zone) for standard view
+        if (viewMode === 'standard') {
+            const rect = scrollRef.current.getBoundingClientRect();
+            if (e.clientX > rect.left + rect.width / 2) {
+                return; // Allow native scroll to pass through
+            }
+        }
+
         // Capture pointer is important for mobile touch-drag so it doesn't get lost
         e.target.setPointerCapture(e.pointerId);
 
         const clickedMin = getMinFromPointer(e.clientX, e.clientY);
         const snappedStart = Math.floor(clickedMin / 5) * 5;
         const activity = getActivity(activeActivityId);
+
+        const nowTime = Date.now();
+        if (nowTime - lastTapRef.current.time < 400 && lastTapRef.current.min === snappedStart) {
+            // Double Tap Detected! Create 15-min block
+            setIsDragging(false);
+            setDragMode(null);
+            setDragPreview(null);
+
+            const slotIds = [];
+            const dayStart = startOfDay(currentDate);
+            for (let m = snappedStart; m < snappedStart + 15; m += 5) {
+                if (m < 1440) {
+                    slotIds.push(addMinutes(dayStart, m).toISOString());
+                }
+            }
+            logSlots(slotIds, activeActivityId);
+
+            // Extra haptic for confirm
+            if (window.navigator && window.navigator.vibrate) window.navigator.vibrate([15, 30, 15]);
+            lastTapRef.current = { time: 0, min: -1 };
+            return;
+        }
+
+        lastTapRef.current = { time: nowTime, min: snappedStart };
 
         // Reset haptic ref
         lastSnappedMinRef.current = snappedStart;
@@ -539,6 +648,14 @@ const DayView = ({ activeActivityId }) => {
             >
                 {viewMode === 'standard' ? (
                     <div style={{ height: `${totalHeight}px`, position: 'relative' }}>
+                        {/* Scroll Zone Visual Cue */}
+                        <div style={{
+                            position: 'absolute', top: 0, bottom: 0, right: 0, width: '50%',
+                            borderLeft: '1px dashed rgba(255,255,255,0.1)',
+                            background: 'linear-gradient(to right, transparent, rgba(0,0,0,0.05))',
+                            pointerEvents: 'none',
+                            zIndex: 1
+                        }} />
                         {renderColumn(0, 1440, 0)}
                         {/* Tactile Ghost Dialog Preview (Standard) */}
                         {dragPreview && (

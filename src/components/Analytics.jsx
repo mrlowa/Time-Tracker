@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import {
-    BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie
+    BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend
 } from 'recharts';
 import { useDrag } from '@use-gesture/react';
 import { Drawer } from 'vaul';
@@ -355,12 +355,12 @@ const Analytics = () => {
                 <>
                     <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', height: '300px' }}>
                         <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', color: 'var(--text-secondary)', textAlign: 'center' }}>Distribution</h3>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
+                        <ResponsiveContainer width="100%" height={300}>
+                            <PieChart margin={{ top: 0, bottom: 20 }}>
                                 <Pie
                                     data={stats.data}
                                     cx="50%"
-                                    cy="50%"
+                                    cy="45%"
                                     innerRadius={60}
                                     outerRadius={80}
                                     paddingAngle={5}
@@ -371,6 +371,7 @@ const Analytics = () => {
                                     ))}
                                 </Pie>
                                 <Tooltip content={<CustomTooltip />} />
+                                <Legend verticalAlign="bottom" height={36} wrapperStyle={{ fontSize: '12px' }} />
                             </PieChart>
                         </ResponsiveContainer>
                     </div>
@@ -392,21 +393,36 @@ const Analytics = () => {
                             <Drawer.Content style={{
                                 background: 'var(--bg-surface)', display: 'flex', flexDirection: 'column',
                                 borderRadius: '24px 24px 0 0', height: '75vh', bottom: 0, left: 0, right: 0,
-                                position: 'fixed', padding: '1.5rem', zIndex: 1000
+                                position: 'fixed', padding: '1.5rem', zIndex: 1000,
+                                paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom, 20px))'
                             }}>
                                 <div style={{ alignSelf: 'center', width: '40px', height: '5px', background: 'rgba(255,255,255,0.2)', borderRadius: '3px', marginBottom: '1.5rem' }} />
                                 <h3 style={{ marginTop: 0, marginBottom: '2rem', fontSize: '1.2rem', color: '#FFF' }}>Activity Breakdown (Hours)</h3>
 
                                 <div style={{ flex: 1, minHeight: 0 }}>
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={stats.data} layout="vertical" margin={{ left: 20, right: 20 }}>
-                                            <XAxis type="number" hide />
-                                            <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 13, fill: '#E0E0E0' }} axisLine={false} tickLine={false} />
+                                    <ResponsiveContainer width="100%" height={300}>
+                                        <BarChart data={stats.data} margin={{ top: 20, right: 30, left: -20, bottom: 40 }}>
+                                            <XAxis
+                                                dataKey="name"
+                                                tick={{ fontSize: 11, fill: '#E0E0E0' }}
+                                                angle={-45}
+                                                textAnchor="end"
+                                                interval={0}
+                                                height={60}
+                                            />
+                                            <YAxis
+                                                type="number"
+                                                width={50}
+                                                tick={{ fontSize: 11, fill: '#E0E0E0' }}
+                                                axisLine={false}
+                                                tickLine={false}
+                                            />
                                             <Tooltip
                                                 cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                                                 content={<CustomTooltip />}
                                             />
-                                            <Bar dataKey="minutes" radius={[0, 6, 6, 0]}>
+                                            <Legend verticalAlign="bottom" wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                                            <Bar dataKey="minutes" radius={[6, 6, 0, 0]}>
                                                 {stats.data.map((entry, index) => (
                                                     <Cell key={`cell-${index}`} fill={entry.color} />
                                                 ))}

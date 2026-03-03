@@ -23,6 +23,9 @@ export const TimeTrackerProvider = ({ children }) => {
         return saved ? JSON.parse(saved) : DEFAULT_ACTIVITIES;
     });
 
+    const [lastDeletedSlots, setLastDeletedSlots] = useState(null);
+    const [toastMessage, setToastMessage] = useState(null);
+
     const [logs, setLogs] = useState(() => {
         const saved = localStorage.getItem(STORAGE_KEYS.LOGS);
         return saved ? JSON.parse(saved) : {};
@@ -89,6 +92,29 @@ export const TimeTrackerProvider = ({ children }) => {
 
     const getActivity = (id) => activities.find(a => a.id === id);
 
+    const removeSlotsWithUndo = (slotIds) => {
+        const backup = {};
+        slotIds.forEach(id => {
+            if (logs[id]) backup[id] = logs[id];
+        });
+        setLastDeletedSlots(backup);
+        setToastMessage('Activity deleted');
+
+        // Auto hide toast
+        setTimeout(() => setToastMessage(null), 5000);
+        logSlots(slotIds, null);
+    };
+
+    const undoDelete = () => {
+        if (lastDeletedSlots) {
+            setLogs(prev => ({ ...prev, ...lastDeletedSlots }));
+            setLastDeletedSlots(null);
+            setToastMessage(null);
+        }
+    };
+
+    const hideToast = () => setToastMessage(null);
+
     return (
         <TimeTrackerContext.Provider value={{
             activities,
@@ -98,7 +124,11 @@ export const TimeTrackerProvider = ({ children }) => {
             deleteActivity,
             logSlot,
             logSlots,
-            getActivity
+            getActivity,
+            removeSlotsWithUndo,
+            undoDelete,
+            hideToast,
+            toastMessage
         }}>
             {children}
         </TimeTrackerContext.Provider>
