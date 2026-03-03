@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import Icon from './Icon';
+import { useTimeTracker } from '../context/TimeTrackerContext';
 
 const LiveFocusOverlay = ({ isOpen, activity, onClose, onFinish, onMinimize }) => {
+    const { activities, startLiveFocus } = useTimeTracker();
+    const [isPickerOpen, setIsPickerOpen] = useState(false);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const [isPaused, setIsPaused] = useState(false);
     const timerRef = useRef(null);
     const slideFinishRef = useRef(null);
 
     // Timer logic
-    // eslint-disable-next-line react-compiler/react-compiler
     useEffect(() => {
         let interval = null;
         if (isOpen && !isPaused) {
@@ -20,6 +22,7 @@ const LiveFocusOverlay = ({ isOpen, activity, onClose, onFinish, onMinimize }) =
             // When closed, gracefully reset without an effect dependency that triggers re-render while open
             setElapsedSeconds(0);
             setIsPaused(false);
+            setIsPickerOpen(false); // Close menu if open
         }
 
         return () => {
@@ -45,6 +48,7 @@ const LiveFocusOverlay = ({ isOpen, activity, onClose, onFinish, onMinimize }) =
         // Reset local state after finishing
         setTimeout(() => {
             setElapsedSeconds(0);
+            setIsPickerOpen(false);
         }, 500);
     };
 
@@ -73,7 +77,7 @@ const LiveFocusOverlay = ({ isOpen, activity, onClose, onFinish, onMinimize }) =
                     }}
                 >
                     {/* Top actions */}
-                    <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
                         <button
                             onClick={onMinimize}
                             style={{ background: 'transparent', border: 'none', color: '#FFF', padding: '0.5rem', cursor: 'pointer', opacity: 0.7 }}
@@ -81,10 +85,19 @@ const LiveFocusOverlay = ({ isOpen, activity, onClose, onFinish, onMinimize }) =
                             <Icon name="ChevronDown" size={28} />
                         </button>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', background: 'rgba(255,255,255,0.1)', borderRadius: '20px' }}>
+                        <button
+                            onClick={() => setIsPickerOpen(!isPickerOpen)}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                padding: '0.5rem 1rem', background: 'rgba(255,255,255,0.1)',
+                                borderRadius: '20px', border: 'none', color: '#FFF', cursor: 'pointer',
+                                transition: 'background 0.2s'
+                            }}
+                        >
                             <Icon name={activity.icon} size={18} style={{ color: activity.color }} />
                             <span style={{ fontWeight: 600 }}>{activity.name}</span>
-                        </div>
+                            <Icon name="ChevronDown" size={14} style={{ opacity: 0.5, marginLeft: '4px' }} />
+                        </button>
 
                         <button
                             onClick={onClose}
@@ -92,6 +105,76 @@ const LiveFocusOverlay = ({ isOpen, activity, onClose, onFinish, onMinimize }) =
                         >
                             <Icon name="X" size={28} />
                         </button>
+
+                        {/* Activity Picker Menu */}
+                        <AnimatePresence>
+                            {isPickerOpen && (
+                                <>
+                                    <div
+                                        style={{ position: 'fixed', inset: 0, zIndex: 10 }}
+                                        onClick={() => setIsPickerOpen(false)}
+                                    />
+                                    <motion.div
+                                        initial={{ opacity: 0, y: -10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        style={{
+                                            position: 'absolute',
+                                            top: '100%',
+                                            left: '50%',
+                                            transform: 'translateX(-50%)',
+                                            marginTop: '1rem',
+                                            background: '#1F1F2E',
+                                            borderRadius: '16px',
+                                            padding: '0.5rem',
+                                            boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+                                            zIndex: 11,
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            minWidth: '220px',
+                                            maxHeight: '50vh',
+                                            overflowY: 'auto'
+                                        }}
+                                    >
+                                        <div style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', color: '#A0A0B0', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                                            Change Activity
+                                        </div>
+                                        {activities.map(act => (
+                                            <button
+                                                key={act.id}
+                                                onClick={() => {
+                                                    startLiveFocus(act.id);
+                                                    setIsPickerOpen(false);
+                                                }}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.75rem',
+                                                    padding: '0.75rem',
+                                                    background: act.id === activity.id ? 'rgba(255,255,255,0.1)' : 'transparent',
+                                                    border: 'none',
+                                                    borderRadius: '10px',
+                                                    color: '#FFF',
+                                                    cursor: 'pointer',
+                                                    width: '100%',
+                                                    textAlign: 'left',
+                                                    transition: 'background 0.2s'
+                                                }}
+                                            >
+                                                <div style={{
+                                                    width: 32, height: 32, borderRadius: '8px',
+                                                    background: `${act.color}33`, color: act.color,
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                                }}>
+                                                    <Icon name={act.icon} size={16} />
+                                                </div>
+                                                <span style={{ fontWeight: 500 }}>{act.name}</span>
+                                            </button>
+                                        ))}
+                                    </motion.div>
+                                </>
+                            )}
+                        </AnimatePresence>
                     </div>
 
                     {/* Clock */}

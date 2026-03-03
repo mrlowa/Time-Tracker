@@ -10,7 +10,6 @@ const CatchUpSheet = ({ isOpen, onClose }) => {
     const [gapInfo, setGapInfo] = useState(null);
 
     // Determine the missing time gap
-    // eslint-disable-next-line react-compiler/react-compiler
     useEffect(() => {
         if (!logs) {
             setGapInfo(null);
