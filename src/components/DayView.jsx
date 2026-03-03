@@ -73,6 +73,37 @@ const DayView = ({ activeActivityId }) => {
     // View Mode: 'standard' | 'overview'
     const [viewMode, setViewMode] = useState('standard');
 
+    useEffect(() => {
+        if (!scrollRef.current) return;
+
+        let startX = 0;
+        let isLeft = false;
+
+        const handleTouchStart = (e) => {
+            if (e.touches && e.touches.length > 0) {
+                startX = e.touches[0].clientX;
+                const rect = scrollRef.current.getBoundingClientRect();
+                isLeft = viewMode === 'standard' && startX < rect.left + rect.width / 2;
+            }
+        };
+
+        const handleTouchMove = (e) => {
+            if (isLeft) {
+                // Prevent native scrolling if touch began in Action Zone
+                e.preventDefault();
+            }
+        };
+
+        const el = scrollRef.current;
+        el.addEventListener('touchstart', handleTouchStart, { passive: true });
+        el.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+        return () => {
+            el.removeEventListener('touchstart', handleTouchStart);
+            el.removeEventListener('touchmove', handleTouchMove);
+        };
+    }, [viewMode]);
+
     // Container Dimensions for Overview Mode
     const [containerHeight, setContainerHeight] = useState(800);
 

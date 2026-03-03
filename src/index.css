@@ -166,6 +166,18 @@ body {
     flex: 0 0 auto;
   }
 
+  .event-block {
+    opacity: 0.9 !important;
+    border-radius: 4px !important;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .event-block input {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
   .main-content {
     margin: 0 !important;
     border-radius: 0 !important;

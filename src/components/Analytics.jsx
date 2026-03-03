@@ -51,11 +51,12 @@ const Analytics = () => {
     const [hiddenActivityIds, setHiddenActivityIds] = useState(new Set());
     const [refreshing, setRefreshing] = useState(false);
     const [pullY, setPullY] = useState(0);
+    const [isBarChartOpen, setIsBarChartOpen] = useState(false);
 
-    const bindPullToRefresh = useDrag(({ movement: [, my], last, cancel, active }) => {
+    const bindGestures = useDrag(({ movement: [, my], swipe: [, sy], last, cancel, active, down }) => {
         if (window.scrollY > 0) return cancel();
 
-        if (my > 0 && my < 200) {
+        if (my > 0 && my < 200 && !isBarChartOpen) {
             setPullY(active ? my : 0);
             if (my > 100 && last && !refreshing) {
                 setRefreshing(true);
@@ -67,6 +68,12 @@ const Analytics = () => {
             }
         } else if (!active && !refreshing) {
             setPullY(0);
+        }
+
+        // Swipe up gesture
+        if ((sy === -1 || (my < -50 && !down)) && stats.data && stats.data.length > 0) {
+            setIsBarChartOpen(true);
+            cancel();
         }
     }, { filterTaps: true, axis: 'y' });
 
@@ -208,7 +215,7 @@ const Analytics = () => {
     }, [logs, range, referenceDate, getActivity, hiddenActivityIds]);
 
     return (
-        <div {...bindPullToRefresh()} style={{
+        <div {...bindGestures()} style={{
             display: 'flex', flexDirection: 'column', gap: '2rem', minHeight: '100%',
             transform: `translateY(${refreshing ? 60 : pullY * 0.4}px)`,
             transition: pullY === 0 || refreshing ? 'transform 0.3s cubic-bezier(0.1, 0.9, 0.2, 1)' : 'none',
@@ -377,7 +384,7 @@ const Analytics = () => {
                     </div>
 
                     {/* Scrubbing Drawer Handle for Bar Chart */}
-                    <Drawer.Root>
+                    <Drawer.Root open={isBarChartOpen} onOpenChange={setIsBarChartOpen}>
                         <Drawer.Trigger asChild>
                             <button className="glass-panel" style={{
                                 margin: '2rem auto', padding: '1rem 2.5rem', border: 'none', borderRadius: '24px',
